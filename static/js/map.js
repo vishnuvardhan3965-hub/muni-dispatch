@@ -39,9 +39,9 @@ const MapEngine = {
   initLeaflet(containerId) {
     this.leafletMap = L.map(containerId).setView([12.9716, 77.5946], 12);
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
-      attribution: '© OpenStreetMap contributors'
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
     }).addTo(this.leafletMap);
 
     this.leafletMap.on('click', (e) => {
