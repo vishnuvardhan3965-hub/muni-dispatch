@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Municipal Infrastructure Hazard & Utility Outage Dispatcher | PS-CIV-04</title>
+  <link rel="stylesheet" href="/css/styles.css">
+  <!-- Optional Leaflet CSS/JS for online maps -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+</head>
+<body>
+  <div id="net-banner" class="net-banner" role="alert">Connection lost. Retrying automatically. Showing the last loaded data.</div>
+
+  <!-- Top Navigation & Header Bar -->
+  <header class="header-bar">
+    <div class="header-container">
+      <div class="brand-wrapper">
+        <div class="brand-icon">🚨</div>
+        <div class="brand-title">
+          <span>MUNI-DISPATCH</span>
+          <span class="brand-subtitle">Municipal Hazard & Outage Dispatch Board</span>
+        </div>
+      </div>
+
+      <!-- Live Emergency Metrics Ticker -->
+      <div class="metrics-strip">
+        <div class="metric-pill critical" id="stat-critical">0 Critical Outages</div>
+        <div class="metric-pill dispatched" id="stat-dispatched">0 Crews Deployed</div>
+        <div class="metric-pill resolved" id="stat-resolved">0 Resolved</div>
+        <div class="metric-pill prevented" id="stat-prevented" title="Redundant 911/helpline calls prevented via sector deduplication">0 Dupes Blocked</div>
+      </div>
+
+      <!-- Role Switcher & Controls -->
+      <div style="display: flex; align-items: center; gap: 0.75rem;">
+        <nav class="view-nav">
+          <button class="nav-btn active" data-role="citizen">
+            <span>📢 Citizen Portal</span>
+          </button>
+          <button class="nav-btn" data-role="dispatcher">
+            <span>👷 Field Crew & Dispatch</span>
+          </button>
+        </nav>
+        <button class="reset-btn" id="btn-crew-out" style="display:none" title="Sign out of crew mode">Sign out</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Layout -->
+  <main class="main-wrapper">
+    <div class="app-grid">
+
+      <!-- LEFT COLUMN: Citizen Hazard Submission Form -->
+      <section class="glass-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <span>📝</span> Report Infrastructure Hazard
+          </div>
+          <span style="font-size: 0.75rem; color: #94a3b8; background: #0f172a; padding: 2px 8px; border-radius: 4px; border: 1px solid #334155;">
+            Public Safety Intake
+          </span>
+        </div>
+
+        <div class="panel-body">
+          <!-- Submission Feedback / Duplicate Rejection Alert -->
+          <div id="submission-alert" class="alert-box"></div>
+
+          <form id="hazard-form">
+            <!-- Hazard Category -->
+            <div class="form-group">
+              <label class="form-label">
+                Hazard Category <span class="required">*</span>
+              </label>
+              <div class="category-picker">
+                <div class="category-option selected" data-cat="ELECTRICAL">
+                  <div class="cat-head"><span>⚡</span> Electrical Grid</div>
+                  <div class="cat-desc">Downed cables, sparking transformers</div>
+                </div>
+                <div class="category-option" data-cat="WATER_DRAINAGE">
+                  <div class="cat-head"><span>💧</span> Water Main</div>
+                  <div class="cat-desc">Burst pipes, localized flooding</div>
+                </div>
+                <div class="category-option" data-cat="SEWAGE_MANHOLE">
+                  <div class="cat-head"><span>⚠️</span> Open Sewer</div>
+                  <div class="cat-desc">Missing manhole cover, shaft drop</div>
+                </div>
+                <div class="category-option" data-cat="GAS_PIPELINE">
+                  <div class="cat-head"><span>🔥</span> Gas Pipeline</div>
+                  <div class="cat-desc">Odor, pipe pressure rupture</div>
+                </div>
+                <div class="category-option" data-cat="ROADWAY_STRUCTURE" style="grid-column: span 2;">
+                  <div class="cat-head"><span>🚧</span> Roadway & Structural Hazard</div>
+                  <div class="cat-desc">Sinkhole, collapsed guard wall, bridge deck fissure</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Location Landmark -->
+            <div class="form-group">
+              <label class="form-label" for="input-landmark">
+                Location Landmark <span class="required">*</span>
+              </label>
+              <input 
+                type="text" 
+                id="input-landmark" 
+                class="form-control" 
+                maxlength="160"
+                placeholder="e.g. Opposite Central Metro Gate 2, corner of 5th Ave"
+                required
+              />
+            </div>
+
+            <!-- Municipal Sector & Geotag Coordinates -->
+            <div class="form-group">
+              <label class="form-label">
+                Sector & Geotag Coordinates <span class="required">*</span>
+              </label>
+              <div style="margin-bottom: 0.5rem;">
+                <select id="input-sector" class="form-control">
+                  <option value="SEC-CENTRAL">SEC-CENTRAL: Downtown Civic & Commercial District</option>
+                  <option value="SEC-NORTH">SEC-NORTH: North Riverfront & Transit Corridor</option>
+                  <option value="SEC-EAST">SEC-EAST: East Industrial & Rail Logistics Zone</option>
+                  <option value="SEC-WEST">SEC-WEST: West Residential & University Sector</option>
+                  <option value="SEC-SOUTH">SEC-SOUTH: South Lake Basin & Water Works Sector</option>
+                </select>
+              </div>
+
+              <div class="geo-input-row">
+                <input type="text" id="input-lat" class="form-control" placeholder="Latitude" readonly />
+                <input type="text" id="input-lng" class="form-control" placeholder="Longitude" readonly />
+                <button type="button" class="btn-gps" id="btn-gps-autotag" title="Use my current GPS location">
+                  <span>📍 GPS</span>
+                </button>
+              </div>
+              <div class="pin-hint" id="pin-status">No pin yet. Click the map or use GPS to mark the hazard.</div>
+            </div>
+
+            <!-- Urgency Level: Low, Medium, Critical -->
+            <div class="form-group">
+              <label class="form-label">
+                Urgency Level <span class="required">*</span>
+              </label>
+              <div class="urgency-selector">
+                <button type="button" class="urgency-btn" data-level="Low">
+                  <span>🟢</span> Low
+                </button>
+                <button type="button" class="urgency-btn selected" data-level="Medium">
+                  <span>🟡</span> Medium
+                </button>
+                <button type="button" class="urgency-btn" data-level="Critical">
+                  <span>🔴</span> Critical
+                </button>
+              </div>
+            </div>
+
+            <!-- Photo Link / Image URL -->
+            <div class="form-group">
+              <label class="form-label" for="input-photo">
+                Photo link (optional)
+              </label>
+              <input type="url" id="input-photo" class="form-control" maxlength="500" placeholder="https://..." />
+              <div class="photo-preview-wrap" id="photo-preview-wrap" style="display:none"></div>
+            </div>
+
+            <!-- Detailed Description -->
+            <div class="form-group">
+              <label class="form-label" for="input-desc">
+                Hazard Context & Observations
+              </label>
+              <textarea 
+                id="input-desc" 
+                class="form-control" 
+                maxlength="1000"
+                placeholder="Describe visible danger, water flow rate, sparks, traffic disruption..."
+              ></textarea>
+            </div>
+
+            <!-- Citizen Contact (Optional) -->
+            <div class="form-group">
+              <label class="form-label" for="input-contact">
+                Contact for follow-up (optional, visible to city crews only)
+              </label>
+              <input 
+                type="text" 
+                id="input-contact" 
+                class="form-control" 
+                maxlength="120"
+                placeholder="Email or phone number"
+              />
+            </div>
+
+            <button type="submit" class="btn-submit" id="btn-submit-hazard">
+              <span>🚨 Submit Hazard Report</span>
+            </button>
+          </form>
+        </div>
+      </section>
+
+      <!-- RIGHT COLUMN: Incident Feed & Interactive GIS Map -->
+      <section style="display: flex; flex-direction: column; gap: 1.5rem;">
+        
+        <!-- GIS Map Board -->
+        <div class="glass-panel">
+          <div class="panel-header">
+            <div class="panel-title">
+              <span>🗺️</span> Municipal GIS Grid & Geotagged Outages
+            </div>
+            <span style="font-size: 0.78rem; color: #94a3b8;">
+              Live GPS Dispatch Layer
+            </span>
+          </div>
+          <div class="map-view-container">
+            <div id="gis-map-mount" style="width: 100%; height: 100%;"></div>
+            <div class="map-overlay-legend">
+              <div class="legend-item"><span class="legend-color" style="background:#ef4444;"></span> Critical Risk</div>
+              <div class="legend-item"><span class="legend-color" style="background:#f59e0b;"></span> Medium Urgency</div>
+              <div class="legend-item"><span class="legend-color" style="background:#3b82f6;"></span> Low Urgency</div>
+              <div class="legend-item"><span class="legend-color" style="background:#10b981;"></span> Resolved Safe</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Incident Feed Filterable by Severity -->
+        <div class="glass-panel">
+          <div class="panel-header">
+            <div class="panel-title">
+              <span>📡</span> Public Hazard Dispatch Feed
+            </div>
+            <span id="feed-count" style="font-size: 0.8rem; font-weight: 600; color: #60a5fa;">
+              Loading feed...
+            </span>
+          </div>
+
+          <div class="panel-body">
+            <!-- Filter Controls -->
+            <div class="feed-header-controls">
+              <!-- Search Bar -->
+              <div class="search-and-sort">
+                <div class="search-input-wrap">
+                  <span class="search-icon">🔍</span>
+                  <input 
+                    type="text" 
+                    id="input-search" 
+                    class="search-input" 
+                    placeholder="Search by ticket code (e.g. HZ-2610), landmark, or keyword..."
+                  />
+                </div>
+                <div>
+                  <select id="filter-sector" class="form-control" style="width: auto; padding: 0.65rem 1rem;">
+                    <option value="All">All Sectors</option>
+                    <option value="SEC-CENTRAL">Sector Central</option>
+                    <option value="SEC-NORTH">Sector North</option>
+                    <option value="SEC-EAST">Sector East</option>
+                    <option value="SEC-WEST">Sector West</option>
+                    <option value="SEC-SOUTH">Sector South</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Filter Badges -->
+              <div class="filter-row">
+                <!-- Urgency Filter -->
+                <div class="filter-group">
+                  <span class="filter-label">Urgency:</span>
+                  <button class="pill-filter active" data-filter="urgency" data-val="All">All</button>
+                  <button class="pill-filter" data-filter="urgency" data-val="Critical">🔴 Critical</button>
+                  <button class="pill-filter" data-filter="urgency" data-val="Medium">🟡 Medium</button>
+                  <button class="pill-filter" data-filter="urgency" data-val="Low">🟢 Low</button>
+                </div>
+
+                <!-- Status Filter -->
+                <div class="filter-group">
+                  <span class="filter-label">Status:</span>
+                  <button class="pill-filter active" data-filter="status" data-val="All">All</button>
+                  <button class="pill-filter" data-filter="status" data-val="REPORTED">Reported</button>
+                  <button class="pill-filter" data-filter="status" data-val="DISPATCHED">Dispatched</button>
+                  <button class="pill-filter" data-filter="status" data-val="ON_SITE_VERIFIED">Verified</button>
+                  <button class="pill-filter" data-filter="status" data-val="RESOLVED">Resolved</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Feed List Mount -->
+            <div id="incidents-feed-list" class="incidents-list"></div>
+          </div>
+        </div>
+
+      </section>
+    </div>
+  </main>
+
+  <!-- MODAL: Dispatch Field Crew -->
+  <div class="modal-backdrop" id="modal-dispatch">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title" id="dispatch-modal-title">🚀 Dispatch Field Crew</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <form id="dispatch-form">
+        <div class="modal-body">
+          <input type="hidden" id="dispatch-hazard-id" />
+          
+          <div class="form-group">
+            <label class="form-label">Assign Field Crew Unit <span class="required">*</span></label>
+            <select id="dispatch-crew-id" class="form-control" required>
+              <option value="CREW-ELEC-09">CREW-ELEC-09 (High Voltage Emergency Truck)</option>
+              <option value="WATER-SQUAD-04">WATER-SQUAD-04 (Hydraulic Valve & Main Crew)</option>
+              <option value="SANITATION-UNIT-12">SANITATION-UNIT-12 (Heavy Grating & Manhole Crane)</option>
+              <option value="GAS-EMERGENCY-03">GAS-EMERGENCY-03 (Mercaptan Sniffer & Pipeline Seal)</option>
+              <option value="CIVIL-UNIT-07">CIVIL-UNIT-07 (Structural Road & Culvert Works)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Dispatch Dispatcher Notes</label>
+            <textarea 
+              id="dispatch-notes" 
+              class="form-control" 
+              placeholder="e.g. Priority dispatch from Central Depot. Carry heavy hydraulic trench pump."
+            ></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn-action btn-timeline" data-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn-action btn-dispatch">Confirm Dispatch</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Field Crew On-Site Verification -->
+  <div class="modal-backdrop" id="modal-verify">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title" id="verify-modal-title">📋 Log On-Site Verification</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <form id="verify-form">
+        <div class="modal-body">
+          <input type="hidden" id="verify-hazard-id" />
+          
+          <div class="form-group">
+            <label class="form-label">Field Crew ID</label>
+            <input type="text" id="verify-crew-id" class="form-control" maxlength="60" required />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Verified On-Site Severity</label>
+            <select id="verify-severity" class="form-control">
+              <option value="Critical">🔴 Critical (Immediate Hazard / High Public Exposure)</option>
+              <option value="Medium" selected>🟡 Medium (Managed Risk / Active Leak)</option>
+              <option value="Low">🟢 Low (Cosmetic / Low Public Threat)</option>
+            </select>
+          </div>
+
+          <div class="form-group" style="display: flex; align-items: center; gap: 0.5rem; background: var(--bg-card); padding: 0.75rem; border-radius: 8px;">
+            <input type="checkbox" id="verify-perimeter" checked style="width: 18px; height: 18px;" />
+            <label for="verify-perimeter" style="font-size: 0.88rem; font-weight: 600; cursor: pointer;">
+              Safety perimeter established & area barricaded from pedestrians
+            </label>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Estimated Repair Time (Hours)</label>
+            <input type="number" step="0.5" id="verify-hours" class="form-control" value="2.5" />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Technical On-Site Notes <span class="required">*</span></label>
+            <textarea 
+              id="verify-notes" 
+              class="form-control" 
+              placeholder="e.g. Arrived on-site. Verified 11kV live conductor. Substation breaker tripped remotely. 15m safety perimeter cordoned. Commencing wire splice."
+              required
+            ></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn-action btn-timeline" data-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn-action btn-verify">Submit On-Site Verification</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Mark Resolved -->
+  <div class="modal-backdrop" id="modal-resolve">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title" id="resolve-modal-title">✅ Complete & Resolve Ticket</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <form id="resolve-form">
+        <div class="modal-body">
+          <input type="hidden" id="resolve-hazard-id" />
+          
+          <div class="form-group">
+            <label class="form-label">Closing Crew / Supervisor ID</label>
+            <input type="text" id="resolve-crew-id" class="form-control" maxlength="60" required />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Resolution Summary <span class="required">*</span></label>
+            <textarea 
+              id="resolve-notes" 
+              class="form-control" 
+              placeholder="e.g. Water main feeder pipe spliced, reinforced collar installed, pressure tested to 8 bar. Roadway backfilled and reopened."
+              required
+            ></textarea>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Replacement Parts / Hardware Deployed</label>
+            <input 
+              type="text" 
+              id="resolve-parts" 
+              class="form-control" 
+              placeholder="e.g. 300mm ductile iron sleeve, heavy-duty manhole frame #C250"
+            />
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn-action btn-timeline" data-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn-action btn-resolve">Close & Mark Resolved</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Full Timeline Audit Log -->
+  <div class="modal-backdrop" id="modal-timeline">
+    <div class="modal-dialog" style="max-width: 680px;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="timeline-modal-title">📜 Chronological Audit Log</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body" id="timeline-body">
+        Loading...
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-action btn-timeline" data-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Crew sign-in -->
+  <div class="modal-backdrop" id="modal-login">
+    <div class="modal-dialog" style="max-width: 420px;">
+      <div class="modal-header">
+        <h3 class="modal-title">👷 Crew sign-in</h3>
+        <button class="modal-close" type="button">&times;</button>
+      </div>
+      <form id="login-form">
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label" for="login-pin">Crew PIN</label>
+            <input type="password" id="login-pin" class="form-control" autocomplete="current-password" required />
+          </div>
+          <div id="login-error" style="color:#fca5a5; font-size:0.85rem; min-height:1.2em;"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn-action btn-timeline" data-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn-action btn-dispatch">Sign in</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer class="app-footer">
+    <div style="max-width: 1440px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+      <div>
+        <strong>PS-CIV-04: Municipal Infrastructure Hazard & Utility Outage Dispatcher</strong> | Civic Tech & Public Works
+      </div>
+      <div>Flask REST API &bull; PostgreSQL</div>
+    </div>
+  </footer>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/map.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
